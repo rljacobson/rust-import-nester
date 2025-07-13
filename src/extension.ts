@@ -1,29 +1,25 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import {sortAndNestRustImports} from './import_sorter';
+import {sortAndNestRustImports} from './import_nester';
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-    const disposable = vscode.commands.registerCommand('rustImportSorter.sortImports', () => {
+    const disposable = vscode.commands.registerCommand('rustImportNester.nestImports', async () => {
         const editor = vscode.window.activeTextEditor;
-        if(!editor) {
+        if(!editor)
             return;
-        }
+
+        vscode.window.showInformationMessage('Rust Import Nester activated!');
 
         const document = editor.document;
         if(document.languageId !== 'rust') {
-            vscode.window.showWarningMessage('This only works with Rust files.');
+            vscode.window.showWarningMessage('Rust Import Sorter only works on Rust files.');
             return;
         }
 
-        const code   = document.getText();
-        const sorted = sortAndNestRustImports(code);
-
-        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(code.length));
-
-        editor.edit(editBuilder => { editBuilder.replace(fullRange, sorted); });
+        await sortAndNestRustImports(document);
     });
 
     context.subscriptions.push(disposable);

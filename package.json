@@ -14,8 +14,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "rustImportSorter.sortImports",
-        "title": "Rust: Sort and Nest Imports"
+        "command": "rustImportNester.nestImports",
+        "title": "Rust: Nest and Sort Imports"
       }
     ]
   },
