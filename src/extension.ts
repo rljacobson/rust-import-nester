@@ -11,7 +11,7 @@ export function activate(context: vscode.ExtensionContext) {
         if(!editor)
             return;
 
-        vscode.window.showInformationMessage('Rust Import Nester activated!');
+        // vscode.window.showInformationMessage('Rust Import Nester activated!');
 
         const document = editor.document;
         if(document.languageId !== 'rust') {

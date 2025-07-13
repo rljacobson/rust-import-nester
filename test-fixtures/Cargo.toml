@@ -10,3 +10,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 rand = "0.8"
+
+[[bin]]
+name = "test_fixtures"
+path = "src/main.rs"
