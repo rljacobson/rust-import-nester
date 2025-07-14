@@ -4,6 +4,24 @@ This is the README for your extension "rust-import-sorter". After writing up a b
 
 ## Features
 
+- Include/exclude a trailing comma in lists.
+- Put lists of leaves on the same line if they have `<= n` items.
+- Linearize levels with only a single item (not just leaves) even if they have a list as a child.
+- Sort alphabetically
+- Sort modules before/after items
+- Order by:
+  1. std lib
+  2. third party
+  3. second party (workspace)
+  4. crate
+  5. relative
+- Order visibility by
+  1. non-`pub`
+  2. pub
+  3. pub(crate)
+  4. pub(qualified)
+
+
 Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
 
 For example if there is an image subfolder under your extension project workspace:

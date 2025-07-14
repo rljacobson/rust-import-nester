@@ -1,3 +1,5 @@
+mod messy;
+
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::io::Write;
@@ -17,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use std::io::BufReader;
 use anyhow::Result;
+
 
 fn main() -> Result<()> {
     let config = AppConfig::load()?;

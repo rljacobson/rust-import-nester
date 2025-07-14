@@ -16,7 +16,23 @@
         "command": "rustImportNester.nestImports",
         "title": "Rust: Nest and Sort Imports"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Rust: Nest and Sort Imports",
+      "properties": {
+        "rustImportNester.trailingComma": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include a trailing comma at the end of multi-line import lists"
+        },
+        "rustImportNester.singleLineThreshold": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 1,
+          "description": "Keep lists of n or fewer leaf items on a single line"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
