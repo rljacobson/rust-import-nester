@@ -3,6 +3,9 @@ import * as vscode from 'vscode';
 import {getRustParser} from './parser';
 
 
+/** Represents a nested tree of use path segments. */
+type Nested = Map<string, Nested>;
+
 /**
  * Extension configuration keys.
  */
@@ -164,8 +167,6 @@ export async function sortAndNestRustImports(document: vscode.TextDocument): Pro
 
     const config = getExtensionConfig();
 
-
-
     // Tree-sitter Logic
     const text   = document.getText();
     const parser = getRustParser();
@@ -187,7 +188,6 @@ export async function sortAndNestRustImports(document: vscode.TextDocument): Pro
     }
 
     // Step: Coalesce adjacent paths with common prefixes into a nested tree
-    type Nested = Map<string, Nested>;
 
     function buildNestedTree(paths: string[][]): Nested {
         const root: Nested = new Map();
@@ -221,88 +221,142 @@ export async function sortAndNestRustImports(document: vscode.TextDocument): Pro
         for (const [k, v] of sorted) node.set(k, v);
     }
 
-    // Pretty prints the nested imports.
-    function formatTreeToRustUses(node: Nested, indent = ''): string[] {
-        const lines: string[] = [];
-
-
-        for(const [name, children] of node) {
-            const isLeafList  = Array.from(children.values()).every(child => child.size === 0);
-            const numChildren = children.size;
-
-            // We format lists of at most `singleLineThreshold` leaf items on a single line.
-            if(isLeafList && numChildren <= config.singleLineThreshold) {
-                if(children.size === 0) {
-                    // Case: just the current name
-                    lines.push(`${indent}${name}`);
-                } else if(children.size === 1) {
-                    // Case: exactly one child
-                    const [[childName]] = children;
-                    lines.push(`${indent}${name}::${childName}`);
-                } else {
-                    // Case: multiple children within threshold
-                    const childItems = Array.from(children.keys()).join(', ');
-                    lines.push(`${indent}${name}::{${childItems}}`);
-                }
-            } else {
-                // The non `singleLineThreshold` case.
-                if(numChildren === 0) {
-                    lines.push(`${indent}${name}`);
-                } else {
-                    const childLines = formatTreeToRustUses(children, indent + '  ');
-                    if(childLines.length === 1 && !childLines[0].includes(',') && !childLines[0].includes('{')) {
-                        lines.push(`${indent}${name}::${childLines[0].trim()}`);
-                    } else {
-                        lines.push(`${indent}${name}::{`);
-                        for(const child of childLines) {
-                            lines.push(`${child}`);
-                        }
-                        lines.push(`${indent}}`);
-                    }
-                }
-            }
-            // Separate each item with a comma
-            lines[lines.length - 1] = lines[lines.length - 1] + ',';
-        }
-
-        // Remove the last comma if trailingComma is false
-        if (!config.trailingComma) {
-            lines[lines.length - 1] = lines[lines.length - 1].slice(0, -1);
-        }
-
-        return lines;
-    }
-
     const nested = buildNestedTree(allPaths);
     sortNestedTree(nested);
 
-    console.log('Coalesced and formatted use declarations:');
-    for (const [topLevel, children] of nested) {
-        const lines = formatTreeToRustUses(new Map([[topLevel, children]]));
-        if (lines.length > 1) {
-            console.log(`use ${lines[0]}`);
-            for (let i = 1; i < lines.length; i++) {
-                if (i < lines.length - 1) {
-                    console.log(lines[i]);
-                } else {
-                    if (config.trailingComma) {
-                        console.log(lines[i].slice(0, -1) + ';');
+    const editor = vscode.window.activeTextEditor;
+    const tabSize = editor?.options.tabSize ?? 2;
+    const indentUnit = ' '.repeat(Number(tabSize));
 
+    const formattedLines = formatUseDeclarations(nested, config.trailingComma, indentUnit);
+    for (const line of formattedLines) {
+        console.log(line);
+    }
+    // Remove old use declarations and insert formatted block
+    const edit = new vscode.WorkspaceEdit();
+    const uri  = document.uri;
+
+    // Collect ranges to delete (non-contiguous), sorted in reverse order
+    const rangesToDelete = uses.map(node => {
+                                   let startOffset = node.startIndex;
+                                   let endOffset   = node.endIndex;
+
+                                   const startPos = document.positionAt(startOffset);
+                                   const endPos   = document.positionAt(endOffset);
+
+                                   const line       = document.lineAt(startPos.line);
+                                   const textOnLine = document.getText(line.range).trim();
+
+                                   const nodeText = document.getText(new vscode.Range(startPos, endPos)).trim();
+
+                                   // If the line only contains the use declaration (plus whitespace), delete the
+                                   // newline too
+                                   if(textOnLine === nodeText && startPos.line < document.lineCount - 1) {
+                                       const nextLineStart = document.lineAt(startPos.line + 1).range.start;
+                                       endOffset           = document.offsetAt(nextLineStart);
+                                   }
+
+                                   const start = document.positionAt(startOffset);
+                                   const end   = document.positionAt(endOffset);
+                                   return new vscode.Range(start, end);
+                               })
+                               .sort((a, b) => b.start.line - a.start.line || b.start.character - a.start.character);
+
+    for(const range of rangesToDelete) {
+        edit.delete(uri, range);
+    }
+
+    // Compute insertion point: location of the first `use` declaration
+    const insertPosition = document.positionAt(uses[0].startIndex);
+    const formattedText  = formattedLines.join('\n') + '\n';
+    edit.insert(uri, insertPosition, formattedText);
+
+    // Apply the edit
+    await vscode.workspace.applyEdit(edit);
+}
+
+
+// Pretty prints the nested imports.
+function formatImportSubtree(node: Nested, indent = '', indentUnit = '  '): string[] {
+    const lines: string[] = [];
+    const config           = getExtensionConfig();
+
+    for(const [name, children] of node) {
+        const isLeafList  = Array.from(children.values()).every((child: Nested) => child.size === 0);
+        const numChildren = children.size;
+
+        // We format lists of at most `singleLineThreshold` leaf items on a single line.
+        if(isLeafList && numChildren <= config.singleLineThreshold) {
+            if(children.size === 0) {
+                // Case: just the current name
+                lines.push(`${indent}${name}`);
+            } else if(children.size === 1) {
+                // Case: exactly one child
+                const [[childName]] = children;
+                lines.push(`${indent}${name}::${childName}`);
+            } else {
+                // Case: multiple children within threshold
+                const childItems = Array.from(children.keys()).join(', ');
+                lines.push(`${indent}${name}::{${childItems}}`);
+            }
+        } else {
+            // The non `singleLineThreshold` case.
+            if(numChildren === 0) {
+                lines.push(`${indent}${name}`);
+            } else {
+                const childLines = formatImportSubtree(children, indent + indentUnit, indentUnit);
+                if(childLines.length === 1 && !childLines[0].includes(',') && !childLines[0].includes('{')) {
+                    lines.push(`${indent}${name}::${childLines[0].trim()}`);
+                } else {
+                    lines.push(`${indent}${name}::{`);
+                    for(const child of childLines) {
+                        lines.push(`${child}`);
+                    }
+                    lines.push(`${indent}}`);
+                }
+            }
+        }
+        // Separate each item with a comma
+        lines[lines.length - 1] = lines[lines.length - 1] + ',';
+    }
+
+    // Remove the last comma if trailingComma is false
+    if(!config.trailingComma) {
+        lines[lines.length - 1] = lines[lines.length - 1].slice(0, -1);
+    }
+
+    return lines;
+}
+
+
+function formatUseDeclarations(nested: Map<string, Nested>, trailingComma: boolean, indentUnit = '  '): string[] {
+    const lines: string[] = [];
+
+    for (const [topLevel, children] of nested) {
+        const subLines = formatImportSubtree(new Map([[topLevel, children]]), '', indentUnit);
+        if (subLines.length > 1) {
+            lines.push(`use ${subLines[0]}`);
+            for (let i = 1; i < subLines.length; i++) {
+                if (i < subLines.length - 1) {
+                    lines.push(subLines[i]);
+                } else {
+                    if (trailingComma) {
+                        lines.push(subLines[i].slice(0, -1) + ';');
                     } else {
-                        // Trailing comma removed elsewhere
-                        console.log(lines[i] + ';');
+                        lines.push(subLines[i] + ';');
                     }
                 }
             }
-        } else if (lines.length === 1) {
-            if (config.trailingComma) {
-                console.log(`use ${lines[0].slice(0, -1)};`);
+        } else if (subLines.length === 1) {
+            if (trailingComma) {
+                lines.push(`use ${subLines[0].slice(0, -1)};`);
             } else {
-                // Trailing comma removed elsewhere
-                console.log(`use ${lines[0]};`);
+                lines.push(`use ${subLines[0]};`);
             }
         }
     }
+
+    return lines;
 }
 
 
